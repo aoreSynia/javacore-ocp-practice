@@ -126,9 +126,7 @@ public final class SalesReporter {
             throw new UncheckedIOException("Lỗi đọc file CSV: " + csvPath, e);
         }
 
-        // Báo cáo hoàn toàn bằng Stream API (không dùng vòng lặp cho phần tổng hợp)
-
-        // 1. Doanh thu thuần theo vùng (giảm dần)
+        // Phần tổng hợp dùng Stream API theo yêu cầu đề bài.
         Map<String, BigDecimal> netRevenueByRegion = validRecords.stream()
                 .collect(Collectors.groupingBy(
                         OrderRecord::region,
@@ -143,7 +141,6 @@ public final class SalesReporter {
                         LinkedHashMap::new
                 ));
 
-        // 2. Top 3 sản phẩm theo doanh thu thuần
         List<Map.Entry<String, BigDecimal>> top3Products = validRecords.stream()
                 .collect(Collectors.groupingBy(
                         OrderRecord::productCode,
@@ -154,7 +151,6 @@ public final class SalesReporter {
                 .limit(3)
                 .toList();
 
-        // 3. Doanh thu thuần theo tháng (YearMonth tăng dần)
         Map<YearMonth, BigDecimal> netRevenueByMonth = validRecords.stream()
                 .collect(Collectors.groupingBy(
                         record -> YearMonth.from(record.orderDate()),
@@ -169,7 +165,6 @@ public final class SalesReporter {
                         LinkedHashMap::new
                 ));
 
-        // 4. Tỷ lệ hoàn trả theo nhóm hàng = RETURNED / COMPLETED, 2 chữ số thập phân
         Map<String, BigDecimal> returnRateByCategory = validRecords.stream()
                 .map(OrderRecord::category)
                 .distinct()
@@ -197,7 +192,6 @@ public final class SalesReporter {
                         LinkedHashMap::new
                 ));
 
-        // 5. Tổng doanh thu thuần
         BigDecimal totalNetRevenue = validRecords.stream()
                 .map(OrderRecord::netRevenueImpact)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);

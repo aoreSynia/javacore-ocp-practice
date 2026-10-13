@@ -112,7 +112,7 @@ class LedgerServiceTest {
     }
 
     @Test
-    @DisplayName("Test tải đồng thời đa luồng: Không deadlock, bảng cân đối thử luôn khớp tuyệt đối")
+    @DisplayName("Test tải đồng thời đa luồng: không deadlock, bảng cân đối thử không đổi")
     void shouldHandleConcurrentTransfersWithoutDeadlockAndPreserveTrialBalance() throws Exception {
         int numAccounts = 50;
         BigDecimal initialBalPerAccount = new BigDecimal("100000000"); // 100M each

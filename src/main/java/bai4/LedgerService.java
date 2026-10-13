@@ -16,14 +16,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Lõi sổ cái chuyển tiền nội bộ (Ledger Service).
- * Đảm bảo:
+ * Xử lý chuyển tiền nội bộ và ghi nhận bút toán kép.
+ *
+ * Quy tắc chính:
  * 1. Bút toán kép: Tổng Nợ = Tổng Có.
  * 2. Phí 0.1% (min 2.000, max 50.000) do người gửi chịu.
  * 3. Kiểm soát thấu chi và hạn mức chuyển 500 triệu/ngày.
- * 4. Idempotency chuẩn mực: nhớ cả kết quả thành công lẫn từ chối.
+ * 4. Idempotency: nhớ cả kết quả thành công lẫn từ chối.
  * 5. Chống deadlock bằng cơ chế khóa theo thứ tự Account ID.
- * 6. Thread-safe, hiệu năng cao, không khóa toàn cục.
  */
 public final class LedgerService {
 
@@ -79,7 +79,7 @@ public final class LedgerService {
     public TransferResult transfer(TransferRequest request) {
         Objects.requireNonNull(request, "TransferRequest không được null");
 
-        // 1. Kiểm tra bộ nhớ đệm Idempotency
+        // Kiểm tra idempotency trước khi đụng tới số dư.
         IdempotencyRecord cached = idempotencyStore.get(request.idempotencyKey());
         if (cached != null) {
             if (isSameContent(cached.request, request)) {
@@ -120,11 +120,10 @@ public final class LedgerService {
             throw ex;
         }
 
-        // Tính phí
         BigDecimal fee = calculateFee(request.amount());
         BigDecimal totalDebit = request.amount().add(fee);
 
-        // Khóa hai tài khoản theo thứ tự sắp xếp Account ID để chống deadlock
+        // Luôn khóa theo thứ tự ID để tránh khóa chéo.
         Account firstLock = fromAcc.id().compareTo(toAcc.id()) < 0 ? fromAcc : toAcc;
         Account secondLock = fromAcc.id().compareTo(toAcc.id()) < 0 ? toAcc : fromAcc;
 
@@ -138,21 +137,18 @@ public final class LedgerService {
                     LocalDate today = now.atZone(zoneId).toLocalDate();
                     String journalId = "JNL-" + UUID.randomUUID();
 
-                    // Kiểm tra và thực hiện trừ tiền người gửi
                     fromAcc.applyPosting(
                             journalId, now, today, EntryType.DEBIT, totalDebit,
                             "Chuyển tiền tới " + toAcc.id() + " (gốc " + request.amount() + " + phí " + fee + ")",
                             true, request.amount()
                     );
 
-                    // Cộng tiền người nhận
                     toAcc.applyPosting(
                             journalId, now, today, EntryType.CREDIT, request.amount(),
                             "Nhận tiền từ " + fromAcc.id(),
                             false, null
                     );
 
-                    // Cộng phí vào tài khoản FEE_INCOME
                     feeIncomeAccount.applyPosting(
                             journalId, now, today, EntryType.CREDIT, fee,
                             "Thu phí chuyển tiền từ " + fromAcc.id(),
@@ -245,7 +241,7 @@ public final class LedgerService {
                     LocalDate today = now.atZone(zoneId).toLocalDate();
                     String reverseJournalId = "REV-" + UUID.randomUUID();
 
-                    // Bút toán đảo không áp hạn mức ngày nhưng vẫn kiểm tra thấu chi của bên bị trừ
+                    // Đảo bút toán không tính hạn mức ngày, nhưng vẫn kiểm tra thấu chi.
                     receiverAcc.applyPosting(
                             reverseJournalId, now, today, EntryType.DEBIT, creditReceiverLine.amount(),
                             "Hoàn tác nhận tiền (đảo bút toán " + journalId + ")",
@@ -297,7 +293,6 @@ public final class LedgerService {
 
         for (Account.AccountPosting p : allPostings) {
             if (p.date().isBefore(fromDate)) {
-                // Tích lũy số dư trước kỳ
                 BigDecimal delta = (p.type() == EntryType.CREDIT) ? p.amount() : p.amount().negate();
                 openingBalance = openingBalance.add(delta);
             } else if (!p.date().isAfter(toDate)) {

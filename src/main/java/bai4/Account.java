@@ -13,7 +13,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Đại diện cho một tài khoản trong sổ cái.
- * Tuân thủ quy tắc: Không có setter cho số dư, số dư chỉ thay đổi qua việc ghi nhận bút toán.
+ * Số dư chỉ thay đổi khi ghi nhận bút toán.
  */
 public final class Account {
 
@@ -67,7 +67,7 @@ public final class Account {
     }
 
     /**
-     * Ghi nhận dòng bút toán vào tài khoản. Chỉ được gọi bởi LedgerService khi đã giữ lock an toàn.
+     * Ghi nhận dòng bút toán vào tài khoản. LedgerService gọi khi đã giữ lock.
      */
     void applyPosting(
             String journalId,
@@ -82,7 +82,6 @@ public final class Account {
         BigDecimal delta = (type == EntryType.CREDIT) ? amount : amount.negate();
         BigDecimal newBalance = balance.add(delta);
 
-        // Kiểm tra thấu chi: balance sau giao dịch không được thấp hơn -overdraftLimit
         BigDecimal minAllowed = overdraftLimit.negate();
         if (newBalance.compareTo(minAllowed) < 0) {
             throw new InsufficientFundsException(
@@ -91,7 +90,6 @@ public final class Account {
             );
         }
 
-        // Kiểm tra hạn mức chuyển đi trong ngày (không tính phí)
         if (checkDailyLimit && transferPrincipal != null && transferPrincipal.compareTo(BigDecimal.ZERO) > 0) {
             BigDecimal currentDaily = dailyOutflow.getOrDefault(date, BigDecimal.ZERO);
             BigDecimal newDaily = currentDaily.add(transferPrincipal);

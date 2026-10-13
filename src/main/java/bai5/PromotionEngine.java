@@ -16,11 +16,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Động cơ khuyến mại tối ưu cho giỏ hàng (Promotion Engine).
- * Áp dụng thuật toán Nhánh cận (Branch and Bound) kết hợp Heuristic Pruning:
- * - Tránh bẫy tham lam làm mất khuyến mại đơn hàng (OrderThreshold).
- * - Đảm bảo thời gian tính toán < 1 giây cho giỏ hàng tối đa 30 dòng, 15 khuyến mại.
- * - Giải thích minh bạch kết quả cho bộ phận CSKH.
+ * Tính giá giỏ hàng sau khuyến mại.
+ * Dùng Branch and Bound để xét khuyến mại cấp dòng trước khi áp khuyến mại cấp đơn.
  */
 public final class PromotionEngine {
 
@@ -49,7 +46,7 @@ public final class PromotionEngine {
             );
         }
 
-        // 1. Lọc bỏ các khuyến mại hết hạn hoặc không áp dụng cho hạng khách hàng
+        // Lọc khuyến mại còn hiệu lực với hạng khách hiện tại.
         List<Promotion> eligiblePromos = promotions.stream()
                 .filter(p -> p.isEligible(customer, at))
                 .sorted(Comparator.comparingInt(Promotion::priority).reversed())
@@ -77,7 +74,7 @@ public final class PromotionEngine {
             }
         }
 
-        // Bản đồ thông tin giỏ hàng
+        // Gom thông tin giỏ hàng theo mã sản phẩm.
         Map<String, Integer> initialInventory = new HashMap<>();
         Map<String, BigDecimal> unitPrices = new HashMap<>();
         Map<String, String> itemCategories = new HashMap<>();
@@ -88,7 +85,7 @@ public final class PromotionEngine {
             itemCategories.put(item.productCode(), item.category());
         }
 
-        // 2. Tìm kiếm nhánh cận (Branch and Bound)
+        // Tìm phương án khuyến mại cấp dòng.
         SearchContext context = new SearchContext(
                 cart, originalTotal, buyXGetYPromos, catPercentPromos, bundlePromos,
                 thresholdPromos, voucherPromos, unitPrices, itemCategories
@@ -166,7 +163,7 @@ public final class PromotionEngine {
         }
 
         Plan search(Map<String, Integer> inventory) {
-            // Khởi tạo phương án cơ sở: không áp dụng khuyến mại dòng nào
+            // Phương án cơ sở: không áp dụng khuyến mại dòng.
             evaluateAndConsider(inventory, Collections.emptyList());
 
             explore(inventory, new ArrayList<>(), 0);
@@ -178,10 +175,10 @@ public final class PromotionEngine {
                 List<PromotionCandidate> currentCandidates,
                 int promoIndex
         ) {
-            // Đánh giá trạng thái hiện tại
+            // Mỗi trạng thái đều có thể là phương án tốt nhất hiện tại.
             evaluateAndConsider(inventory, currentCandidates);
 
-            // Sinh các ứng viên cấp dòng có thể áp dụng từ trạng thái kho hiện tại
+            // Sinh các ứng viên cấp dòng từ lượng hàng còn lại.
             List<PromotionCandidate> availableSteps = new ArrayList<>();
 
             for (BuyXGetYPromotion p : buyXGetYPromos) {
@@ -194,7 +191,7 @@ public final class PromotionEngine {
                 availableSteps.addAll(p.generateCandidates(inventory, unitPrices, itemCategories));
             }
 
-            // Sắp xếp theo mức giảm giá giảm dần
+            // Ưu tiên nhánh có mức giảm lớn trước.
             availableSteps.sort(Comparator.comparing(PromotionCandidate::discountAmount).reversed());
 
             for (PromotionCandidate step : availableSteps) {
@@ -254,7 +251,7 @@ public final class PromotionEngine {
             }
             List<AppliedPromotion> appliedList = new ArrayList<>(lineMap.values());
 
-            // Áp dụng khuyến mại cấp đơn: OrderThreshold rồi Voucher
+            // Khuyến mại cấp đơn áp theo thứ tự đề bài.
             BigDecimal afterThreshold = afterLine;
             for (OrderThresholdPromotion otp : thresholdPromos) {
                 if (afterLine.compareTo(otp.threshold()) >= 0) {
@@ -301,16 +298,16 @@ public final class PromotionEngine {
         }
 
         private boolean isBetter(Plan candidate, Plan current) {
-            // 1. Số tiền khách trả nhỏ nhất
+            // Ưu tiên số tiền phải trả thấp hơn.
             int cmpPayment = candidate.finalPayment().compareTo(current.finalPayment());
             if (cmpPayment < 0) return true;
             if (cmpPayment > 0) return false;
 
-            // 2. Hòa: chọn phương án dùng ít khuyến mại dòng hơn
+            // Nếu bằng tiền, chọn phương án dùng ít khuyến mại dòng hơn.
             if (candidate.linePromoCount() < current.linePromoCount()) return true;
             if (candidate.linePromoCount() > current.linePromoCount()) return false;
 
-            // 3. Vẫn hòa: chọn phương án có tổng độ ưu tiên cao hơn
+            // Nếu vẫn hòa, chọn tổng độ ưu tiên cao hơn.
             return candidate.totalPriority() > current.totalPriority();
         }
 
